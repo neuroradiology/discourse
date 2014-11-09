@@ -2,6 +2,24 @@ require 'spec_helper'
 
 describe SessionController do
 
+  describe 'become' do
+    let!(:user) { Fabricate(:user) }
+
+    it "does not work when not in development mode" do
+      Rails.env.stubs(:development?).returns(false)
+      get :become, session_id: user.username
+      response.should_not be_redirect
+      session[:current_user_id].should be_blank
+    end
+
+    it "works in developmenet mode" do
+      Rails.env.stubs(:development?).returns(true)
+      get :become, session_id: user.username
+      response.should be_redirect
+      session[:current_user_id].should == user.id
+    end
+  end
+
   describe '.sso_login' do
 
     before do
@@ -182,6 +200,14 @@ describe SessionController do
       describe 'invalid password' do
         it "should return an error with an invalid password" do
           xhr :post, :create, login: user.username, password: 'sssss'
+          ::JSON.parse(response.body)['error'].should be_present
+        end
+      end
+
+      describe 'invalid password' do
+        it "should return an error with an invalid password if too long" do
+          User.any_instance.expects(:confirm_password?).never
+          xhr :post, :create, login: user.username, password: ('s' * (User.max_password_length + 1))
           ::JSON.parse(response.body)['error'].should be_present
         end
       end

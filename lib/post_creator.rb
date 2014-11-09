@@ -28,6 +28,7 @@ class PostCreator
   #   When creating a topic:
   #     title                 - New topic title
   #     archetype             - Topic archetype
+  #     is_warning            - Is the topic a warning?
   #     category              - Category to assign to topic
   #     target_usernames      - comma delimited list of usernames for membership (private message)
   #     target_group_names    - comma delimited list of groups for membership (private message)
@@ -75,6 +76,7 @@ class PostCreator
       store_unique_post_key
       track_topic
       update_topic_stats
+      update_topic_auto_close
       update_user_counts
       create_embedded_topic
 
@@ -207,6 +209,12 @@ class PostCreator
     @topic.update_attributes(attrs)
   end
 
+  def update_topic_auto_close
+    if @topic.auto_close_based_on_last_post && @topic.auto_close_hours
+      @topic.set_auto_close(@topic.auto_close_hours).save
+    end
+  end
+
   def setup_post
     @opts[:raw] = TextCleaner.normalize_whitespaces(@opts[:raw]).gsub(/\s+\z/, "")
 
@@ -215,7 +223,7 @@ class PostCreator
                             reply_to_post_number: @opts[:reply_to_post_number])
 
     # Attributes we pass through to the post instance if present
-    [:post_type, :no_bump, :cooking_options, :image_sizes, :acting_user, :invalidate_oneboxes, :cook_method, :via_email].each do |a|
+    [:post_type, :no_bump, :cooking_options, :image_sizes, :acting_user, :invalidate_oneboxes, :cook_method, :via_email, :raw_email].each do |a|
       post.send("#{a}=", @opts[a]) if @opts[a].present?
     end
 
@@ -290,7 +298,7 @@ class PostCreator
                      @topic.id,
                      posted: true,
                      last_read_post_number: @post.post_number,
-                     seen_post_count: @post.post_number)
+                     highest_seen_post_number: @post.post_number)
 
 
     # assume it took us 5 seconds of reading time to make a post

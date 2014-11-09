@@ -15,6 +15,10 @@ function response(code, obj) {
   return [code, {"Content-Type": "application/json"}, obj];
 }
 
+function success() {
+  return response();
+}
+
 export default function() {
   var server = new Pretender(function() {
 
@@ -32,6 +36,10 @@ export default function() {
           });
         }
       }
+    });
+
+    this.get("/t/id_for/:slug", function() {
+      return response({id: 280, slug: "internationalization-localization", url: "/t/internationalization-localization/280"});
     });
 
     this.get("/404-body", function() {
@@ -73,6 +81,9 @@ export default function() {
     this.get('/login.html', function() {
       return [200, {}, 'LOGIN PAGE'];
     });
+
+    this.delete('/posts/:post_id', success);
+    this.put('/posts/:post_id/recover', success);
   });
 
 

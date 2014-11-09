@@ -73,6 +73,7 @@ class ImportScripts::Base
     puts ""
 
     update_bumped_at
+    update_last_posted_at
     update_feature_topic_users
     update_category_featured_topics
     update_topic_count_replies
@@ -321,6 +322,12 @@ class ImportScripts::Base
   def create_categories(results)
     results.each do |c|
       params = yield(c)
+
+      # Basic massaging on the category name
+      params[:name] = "Blank" if params[:name].blank?
+      params[:name].strip!
+      params[:name] = params[:name][0..49]
+
       puts "\t#{params[:name]}"
 
       # make sure categories don't go more than 2 levels deep
@@ -357,6 +364,10 @@ class ImportScripts::Base
     new_category
   end
 
+  def created_post(post)
+    # override if needed
+  end
+
   # Iterates through a collection of posts to be imported.
   # It can create topics and replies.
   # Attributes will be passed to the PostCreator.
@@ -388,6 +399,8 @@ class ImportScripts::Base
                 topic_id: new_post.topic_id,
                 url: new_post.url,
               }
+
+              created_post(new_post)
 
               created += 1
             else
@@ -463,7 +476,27 @@ class ImportScripts::Base
 
   def update_bumped_at
     puts "", "updating bumped_at on topics"
-    Post.exec_sql("update topics t set bumped_at = (select max(created_at) from posts where topic_id = t.id and post_type != #{Post.types[:moderator_action]})")
+    Post.exec_sql("update topics t set bumped_at = COALESCE((select max(created_at) from posts where topic_id = t.id and post_type != #{Post.types[:moderator_action]}), bumped_at)")
+  end
+
+  def update_last_posted_at
+    puts "", "updating last posted at on users"
+
+    sql = <<-SQL
+      WITH lpa AS (
+        SELECT user_id, MAX(posts.created_at) AS last_posted_at
+        FROM posts
+        GROUP BY user_id
+      )
+      UPDATE users
+      SET last_posted_at = lpa.last_posted_at
+      FROM users u1
+      JOIN lpa ON lpa.user_id = u1.id
+      WHERE u1.id = users.id
+        AND users.last_posted_at <> lpa.last_posted_at
+    SQL
+
+    User.exec_sql(sql)
   end
 
   def update_feature_topic_users
@@ -520,7 +553,7 @@ class ImportScripts::Base
   end
 
   def print_status(current, max)
-    print "\r%9d / %d (%5.1f%%)" % [current, max, ((current.to_f / max.to_f) * 100).round(1)]
+    print "\r%9d / %d (%5.1f%%)  " % [current, max, ((current.to_f / max.to_f) * 100).round(1)]
   end
 
   def batches(batch_size)

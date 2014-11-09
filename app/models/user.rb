@@ -35,11 +35,13 @@ class User < ActiveRecord::Base
   has_many :invites, dependent: :destroy
   has_many :topic_links, dependent: :destroy
   has_many :uploads
+  has_many :warnings
 
   has_one :user_avatar, dependent: :destroy
   has_one :facebook_user_info, dependent: :destroy
   has_one :twitter_user_info, dependent: :destroy
   has_one :github_user_info, dependent: :destroy
+  has_one :google_user_info, dependent: :destroy
   has_one :oauth2_user_info, dependent: :destroy
   has_one :user_stat, dependent: :destroy
   has_one :user_profile, dependent: :destroy, inverse_of: :user
@@ -114,6 +116,10 @@ class User < ActiveRecord::Base
   module NewTopicDuration
     ALWAYS = -1
     LAST_VISIT = -2
+  end
+
+  def self.max_password_length
+    200
   end
 
   def self.username_length
@@ -236,6 +242,7 @@ class User < ActiveRecord::Base
 
   def reload
     @unread_notifications_by_type = nil
+    @unread_total_notifications = nil
     @unread_pms = nil
     super
   end
@@ -248,15 +255,24 @@ class User < ActiveRecord::Base
     unread_notifications_by_type.except(Notification.types[:private_message]).values.sum
   end
 
+  def total_unread_notifications
+    @unread_total_notifications ||= notifications.where("read = false").count
+  end
+
   def saw_notification_id(notification_id)
-    User.where(["id = ? and seen_notification_id < ?", id, notification_id])
+    User.where("id = ? and seen_notification_id < ?", id, notification_id)
         .update_all ["seen_notification_id = ?", notification_id]
+
+    # mark all badge notifications read
+    Notification.where('user_id = ? AND NOT read AND notification_type = ?', id, Notification.types[:granted_badge])
+        .update_all ["read = ?", true]
   end
 
   def publish_notifications_state
     MessageBus.publish("/notification/#{id}",
                        {unread_notifications: unread_notifications,
-                        unread_private_messages: unread_private_messages},
+                        unread_private_messages: unread_private_messages,
+                        total_unread_notifications: total_unread_notifications},
                        user_ids: [id] # only publish the notification to this user
     )
   end
@@ -346,7 +362,6 @@ class User < ActiveRecord::Base
     "//www.gravatar.com/avatar/#{email_hash}.png?s={size}&r=pg&d=identicon"
   end
 
-
   # Don't pass this up to the client - it's meant for server side use
   # This is used in
   #   - self oneboxes in open graph data
@@ -391,6 +406,10 @@ class User < ActiveRecord::Base
 
   def flags_given_count
     PostAction.where(user_id: id, post_action_type_id: PostActionType.flag_types.values).count
+  end
+
+  def warnings_received_count
+    warnings.count
   end
 
   def flags_received_count
@@ -502,6 +521,9 @@ class User < ActiveRecord::Base
   def featured_user_badges
     user_badges
         .joins(:badge)
+        .order("CASE WHEN badges.id = (SELECT MAX(ub2.badge_id) FROM user_badges ub2
+                              WHERE ub2.badge_id IN (#{Badge.trust_level_badge_ids.join(",")}) AND
+                                    ub2.user_id = #{self.id}) THEN 1 ELSE 0 END DESC")
         .order('badges.badge_type_id ASC, badges.grant_count ASC')
         .includes(:user, :granted_by, badge: :badge_type)
         .where("user_badges.id in (select min(u2.id)
@@ -509,8 +531,8 @@ class User < ActiveRecord::Base
         .limit(3)
   end
 
-  def self.count_by_signup_date(sinceDaysAgo=30)
-    where('created_at > ?', sinceDaysAgo.days.ago).group('date(created_at)').order('date(created_at)').count
+  def self.count_by_signup_date(start_date, end_date)
+    where('created_at >= ? and created_at < ?', start_date, end_date).group('date(created_at)').order('date(created_at)').count
   end
 
 
@@ -561,8 +583,16 @@ class User < ActiveRecord::Base
     last_sent_email_address || email
   end
 
-  def leader_requirements
+  def tl3_requirements
     @lq ||= TrustLevel3Requirements.new(self)
+  end
+
+  def on_tl3_grace_period?
+    UserHistory.for(self, :auto_trust_level_change)
+      .where('created_at >= ?', SiteSetting.tl3_promotion_min_duration.to_i.days.ago)
+      .where(previous_value: TrustLevel[2].to_s)
+      .where(new_value: TrustLevel[3].to_s)
+      .exists?
   end
 
   def should_be_redirected_to_top
@@ -625,6 +655,40 @@ class User < ActiveRecord::Base
     user_stat.try(:first_post_created_at)
   end
 
+  def associated_accounts
+    result = []
+
+    result << "Twitter(#{twitter_user_info.screen_name})" if twitter_user_info
+    result << "Facebook(#{facebook_user_info.username})"  if facebook_user_info
+    result << "Google(#{google_user_info.email})"         if google_user_info
+    result << "Github(#{github_user_info.screen_name})"   if github_user_info
+
+    user_open_ids.each do |oid|
+      result << "OpenID #{oid.url[0..20]}...(#{oid.email})"
+    end
+
+    result.empty? ? I18n.t("user.no_accounts_associated") : result.join(", ")
+  end
+
+  def user_fields
+    return @user_fields if @user_fields
+    user_field_ids = UserField.pluck(:id)
+    if user_field_ids.present?
+      @user_fields = {}
+      user_field_ids.each do |fid|
+        @user_fields[fid.to_s] = custom_fields["user_field_#{fid}"]
+      end
+    end
+    @user_fields
+  end
+
+  def title=(val)
+    write_attribute(:title, val)
+    if !new_record? && user_profile
+      user_profile.update_column(:badge_granted_title, false)
+    end
+  end
+
   protected
 
   def badge_grant
@@ -674,6 +738,7 @@ class User < ActiveRecord::Base
   end
 
   def hash_password(password, salt)
+    raise "password is too long" if password.size > User.max_password_length
     Pbkdf2.hash_password(password, salt, Rails.configuration.pbkdf2_iterations, Rails.configuration.pbkdf2_algorithm)
   end
 

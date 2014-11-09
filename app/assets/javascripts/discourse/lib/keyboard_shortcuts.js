@@ -27,8 +27,6 @@ Discourse.KeyboardShortcuts = Ember.Object.createWithMixins({
   },
 
   CLICK_BINDINGS: {
-    'c': '#create-topic',                                         // create new topic
-
     // star topic
     'f': '#topic-footer-buttons button.star, .topic-list tr.topic-list-item.selected a.star',
 
@@ -47,6 +45,7 @@ Discourse.KeyboardShortcuts = Ember.Object.createWithMixins({
   },
 
   FUNCTION_BINDINGS: {
+    'c': 'createTopic',                                         // create new topic
     'home': 'goToFirstPost',
     '#': 'toggleProgress',
     'end': 'goToLastPost',
@@ -116,25 +115,23 @@ Discourse.KeyboardShortcuts = Ember.Object.createWithMixins({
   },
 
   showBuiltinSearch: function() {
-    var routeName = _.map(Discourse.Router.router.currentHandlerInfos, "name").join("_");
-    var blacklist = [
-      /^application_discovery_discovery.categories/
-    ];
+    var currentPath = this.container.lookup('controller:application').get('currentPath'),
+        blacklist = [ /^discovery\.categories/ ],
+        whitelist = [ /^topic\./ ],
+        check = function(regex) { return !!currentPath.match(regex); },
+        showSearch = whitelist.any(check) && !blacklist.any(check);
 
-    var whitelist = [
-      /^application_topic_/
-    ];
+    // If we're viewing a topic, only intercept search if there are cloaked posts
+    if (showSearch && currentPath.match(/^topic\./)) {
+      showSearch = $('.cooked').length < this.container.lookup('controller:topic').get('postStream.stream.length');
 
-    var check = function(regex){return routeName.match(regex);};
-
-    var whitelisted = _.any(whitelist, check);
-    var blacklisted = _.any(blacklist, check);
-
-    if(whitelisted && !blacklisted){
-      return this.showSearch(true);
-    } else {
-      return true;
     }
+
+    return showSearch ? this.showSearch(true) : true;
+  },
+
+  createTopic: function() {
+    Discourse.__container__.lookup('controller:composer').open({action: Discourse.Composer.CREATE_TOPIC, draftKey: Discourse.Composer.DRAFT});
   },
 
   toggleProgress: function() {
@@ -208,8 +205,11 @@ Discourse.KeyboardShortcuts = Ember.Object.createWithMixins({
     var $selected = $articles.filter('.selected'),
         index = $articles.index($selected);
 
-    // loop is not allowed
-    if (direction === -1 && index === 0) { return; }
+    if($selected.length !== 0){ //boundries check
+      // loop is not allowed
+      if (direction === -1 && index === 0) { return; }
+      if (direction === 1 && index === ($articles.size()-1) ) { return;}  
+    }
 
     // if nothing is selected go to the first post on screen
     if ($selected.length === 0) {
@@ -235,10 +235,17 @@ Discourse.KeyboardShortcuts = Ember.Object.createWithMixins({
 
     if ($article.size() > 0) {
       $articles.removeClass('selected');
-      Em.run.next(function(){
-        $article.addClass('selected');
-      });
+      $article.addClass('selected');
 
+      if ($article.is('.topic-post')) {
+        var tabLoc = $article.find('a.tabLoc');
+        if (tabLoc.length === 0) {
+          tabLoc = $('<a class="tabLoc"></a>');
+          $article.prepend(tabLoc);
+        }
+        tabLoc.focus();
+      }
+      
       var rgx = new RegExp("post-cloak-(\\d+)").exec($article.parent()[0].id);
       if (rgx === null || typeof rgx[1] === 'undefined') {
           this._scrollList($article, direction);
@@ -249,8 +256,8 @@ Discourse.KeyboardShortcuts = Ember.Object.createWithMixins({
   },
 
   _scrollList: function($article, direction) {
-    var $body = $('body'),
-        distToElement = $article.position().top + $article.height() - $(window).height() - $body.scrollTop();
+    var $document = $(document),
+        distToElement = $article.position().top + $article.height() - $(window).height() - $document.scrollTop();
 
     // cut some bottom slack
     distToElement += 40;
@@ -260,7 +267,7 @@ Discourse.KeyboardShortcuts = Ember.Object.createWithMixins({
       return;
     }
 
-    $('html, body').scrollTop($body.scrollTop() + distToElement);
+    $('html, body').scrollTop($document.scrollTop() + distToElement);
   },
 
   _findArticles: function() {

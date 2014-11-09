@@ -35,7 +35,7 @@ describe ScreenedIpAddress do
 
   describe "ip_address_with_mask" do
     it "returns nil when ip_address is nil" do
-      described_class.new.ip_address_with_mask.should be_nil
+      described_class.new.ip_address_with_mask.should == nil
     end
 
     it "returns ip_address without mask if there is no mask" do
@@ -76,6 +76,8 @@ describe ScreenedIpAddress do
       test_good_value("123.12.*.*",    "123.12.0.0/16")
       test_good_value("123.12.1.*",    "123.12.1.0/24")
       test_good_value("123.12.*.*/16", "123.12.0.0/16")
+      test_good_value("123.12.*",      "123.12.0.0/16")
+      test_good_value("123.*",         "123.0.0.0/8")
     end
 
     it "handles bad input" do

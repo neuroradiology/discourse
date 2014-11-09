@@ -3,6 +3,7 @@ require_dependency 'guardian/ensure_magic'
 require_dependency 'guardian/post_guardian'
 require_dependency 'guardian/topic_guardian'
 require_dependency 'guardian/user_guardian'
+require_dependency 'guardian/post_revision_guardian'
 
 # The guardian is responsible for confirming access to various site resources and operations
 class Guardian
@@ -11,6 +12,7 @@ class Guardian
   include PostGuardian
   include TopicGuardian
   include UserGuardian
+  include PostRevisionGuardian
 
   class AnonymousUser
     def blank?; true; end
@@ -23,6 +25,8 @@ class Guardian
     def has_trust_level?(level); false; end
     def email; nil; end
   end
+
+  attr_accessor :can_see_emails
 
   def initialize(user=nil)
     @user = user.presence || AnonymousUser.new
@@ -239,6 +243,10 @@ class Guardian
       @user == Discourse.system_user) &&
     # Can't send PMs to suspended users
     (is_staff? || target.is_a?(Group) || !target.suspended?)
+  end
+
+  def can_see_emails?
+    @can_see_emails
   end
 
   private
