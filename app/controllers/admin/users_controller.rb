@@ -22,7 +22,9 @@ class Admin::UsersController < Admin::AdminController
                                     :remove_group,
                                     :primary_group,
                                     :generate_api_key,
-                                    :revoke_api_key]
+                                    :revoke_api_key,
+                                    :anonymize,
+                                    :reset_bounce_score]
 
   def index
     users = ::AdminUserIndexQuery.new(params).find_users
@@ -32,12 +34,12 @@ class Admin::UsersController < Admin::AdminController
       StaffActionLogger.new(current_user).log_show_emails(users)
     end
 
-    render_serialized(users, AdminUserSerializer)
+    render_serialized(users, AdminUserListSerializer)
   end
 
   def show
-    @user = User.find_by(username_lower: params[:id])
-    raise Discourse::NotFound.new unless @user
+    @user = User.find_by(id: params[:id])
+    raise Discourse::NotFound unless @user
     render_serialized(@user, AdminDetailedUserSerializer, root: false)
   end
 
@@ -52,7 +54,9 @@ class Admin::UsersController < Admin::AdminController
     @user.suspended_till = params[:duration].to_i.days.from_now
     @user.suspended_at = DateTime.now
     @user.save!
+    @user.revoke_api_key
     StaffActionLogger.new(current_user).log_user_suspend(@user, params[:reason])
+    @user.logged_out
     render nothing: true
   end
 
@@ -66,9 +70,14 @@ class Admin::UsersController < Admin::AdminController
   end
 
   def log_out
-    @user.auth_token = nil
-    @user.save!
-    render nothing: true
+    if @user
+      @user.auth_token = nil
+      @user.save!
+      @user.logged_out
+      render json: success_json
+    else
+      render json: {error: I18n.t('admin_js.admin.users.id_not_found')}, status: 404
+    end
   end
 
   def refresh_browsers
@@ -79,6 +88,7 @@ class Admin::UsersController < Admin::AdminController
   def revoke_admin
     guardian.ensure_can_revoke_admin!(@user)
     @user.revoke_admin!
+    StaffActionLogger.new(current_user).log_revoke_admin(@user)
     render nothing: true
   end
 
@@ -95,25 +105,31 @@ class Admin::UsersController < Admin::AdminController
   def grant_admin
     guardian.ensure_can_grant_admin!(@user)
     @user.grant_admin!
+    StaffActionLogger.new(current_user).log_grant_admin(@user)
     render_serialized(@user, AdminUserSerializer)
   end
 
   def revoke_moderation
     guardian.ensure_can_revoke_moderation!(@user)
     @user.revoke_moderation!
+    StaffActionLogger.new(current_user).log_revoke_moderation(@user)
     render nothing: true
   end
 
   def grant_moderation
     guardian.ensure_can_grant_moderation!(@user)
     @user.grant_moderation!
+    StaffActionLogger.new(current_user).log_grant_moderation(@user)
     render_serialized(@user, AdminUserSerializer)
   end
 
   def add_group
     group = Group.find(params[:group_id].to_i)
     return render_json_error group unless group && !group.automatic
-    group.users << @user
+
+    # We don't care about duplicate group assignment
+    group.users << @user rescue ActiveRecord::RecordNotUnique
+
     render nothing: true
   end
 
@@ -159,7 +175,7 @@ class Admin::UsersController < Admin::AdminController
 
     new_lock = params[:locked].to_s
     unless new_lock =~ /true|false/
-      return render_json_error I18n.t('errors.invalid_boolaen')
+      return render_json_error I18n.t('errors.invalid_boolean')
     end
 
     @user.trust_level_locked = new_lock == "true"
@@ -193,7 +209,7 @@ class Admin::UsersController < Admin::AdminController
   def activate
     guardian.ensure_can_activate!(@user)
     @user.activate
-    render nothing: true
+    render json: success_json
   end
 
   def deactivate
@@ -205,7 +221,7 @@ class Admin::UsersController < Admin::AdminController
 
   def block
     guardian.ensure_can_block_user! @user
-    UserBlocker.block(@user, current_user)
+    UserBlocker.block(@user, current_user, keep_posts: true)
     render nothing: true
   end
 
@@ -264,15 +280,86 @@ class Admin::UsersController < Admin::AdminController
   end
 
   def sync_sso
-    unless SiteSetting.enable_sso
-      render nothing: true, status: 404
-      return
-    end
+    return render nothing: true, status: 404 unless SiteSetting.enable_sso
 
     sso = DiscourseSingleSignOn.parse("sso=#{params[:sso]}&sig=#{params[:sig]}")
-    user = sso.lookup_or_create_user
 
-    render_serialized(user, AdminDetailedUserSerializer, root: false)
+    begin
+      user = sso.lookup_or_create_user
+      render_serialized(user, AdminDetailedUserSerializer, root: false)
+    rescue ActiveRecord::RecordInvalid => ex
+      render json: failed_json.merge(message: ex.message), status: 403
+    end
+  end
+
+  def delete_other_accounts_with_same_ip
+    params.require(:ip)
+    params.require(:exclude)
+    params.require(:order)
+
+    user_destroyer = UserDestroyer.new(current_user)
+    options = { delete_posts: true, block_email: true, block_urls: true, block_ip: true, delete_as_spammer: true }
+
+    AdminUserIndexQuery.new(params).find_users(50).each do |user|
+      user_destroyer.destroy(user, options) rescue nil
+    end
+
+    render json: success_json
+  end
+
+  def total_other_accounts_with_same_ip
+    params.require(:ip)
+    params.require(:exclude)
+    params.require(:order)
+
+    render json: { total: AdminUserIndexQuery.new(params).count_users }
+  end
+
+  def invite_admin
+
+    email = params[:email]
+    unless user = User.find_by_email(email)
+      name = params[:name] if params[:name].present?
+      username = params[:username] if params[:username].present?
+
+      user = User.new(email: email)
+      user.password = SecureRandom.hex
+      user.username = UserNameSuggester.suggest(username || name || email)
+      user.name = User.suggest_name(name || username || email)
+    end
+
+    user.active = true
+    user.save!
+    user.grant_admin!
+    user.change_trust_level!(4)
+    user.email_tokens.update_all  confirmed: true
+
+    email_token = user.email_tokens.create(email: user.email)
+
+    unless params[:send_email] == '0' || params[:send_email] == 'false'
+      Jobs.enqueue( :critical_user_email,
+                    type: :account_created,
+                    user_id: user.id,
+                    email_token: email_token.token)
+    end
+
+    render json: success_json.merge!(password_url: "#{Discourse.base_url}/users/password-reset/#{email_token.token}")
+
+  end
+
+  def anonymize
+    guardian.ensure_can_anonymize_user!(@user)
+    if user = UserAnonymizer.new(@user, current_user).make_anonymous
+      render json: success_json.merge(username: user.username)
+    else
+      render json: failed_json.merge(user: AdminDetailedUserSerializer.new(user, root: false).as_json)
+    end
+  end
+
+  def reset_bounce_score
+    guardian.ensure_can_reset_bounce_score!(@user)
+    @user.user_stat.update_columns(bounce_score: 0, reset_bounce_score_after: nil)
+    render json: success_json
   end
 
   private

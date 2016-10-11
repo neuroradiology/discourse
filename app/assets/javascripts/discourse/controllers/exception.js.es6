@@ -1,6 +1,3 @@
-import ObjectController from 'discourse/controllers/object';
-
-
 var ButtonBackBright = {
       classes: "btn-primary",
       action: "back",
@@ -14,7 +11,8 @@ var ButtonBackBright = {
     ButtonTryAgain = {
       classes: "btn-primary",
       action: "tryLoading",
-      key: "errors.buttons.again"
+      key: "errors.buttons.again",
+      icon: "refresh"
     },
     ButtonLoadPage = {
       classes: "btn-primary",
@@ -22,15 +20,8 @@ var ButtonBackBright = {
       key: "errors.buttons.fixed"
     };
 
-/**
-  The controller for the nice error page
-
-  @class ExceptionController
-  @extends ObjectController
-  @namespace Discourse
-  @module Discourse
-**/
-export default ObjectController.extend({
+// The controller for the nice error page
+export default Ember.Controller.extend({
   thrown: null,
   lastTransition: null,
 
@@ -41,6 +32,7 @@ export default ObjectController.extend({
     if (this.get('thrown.jqTextStatus') === "timeout") return true;
     return false;
   }.property(),
+  isNotFound: Em.computed.equal('thrown.status', 404),
   isForbidden: Em.computed.equal('thrown.status', 403),
   isServer: Em.computed.gte('thrown.status', 500),
   isUnknown: Em.computed.none('isNetwork', 'isServer'),
@@ -60,6 +52,8 @@ export default ObjectController.extend({
       return I18n.t('errors.reasons.network');
     } else if (this.get('isServer')) {
       return I18n.t('errors.reasons.server');
+    } else if (this.get('isNotFound')) {
+      return I18n.t('errors.reasons.not_found');
     } else if (this.get('isForbidden')) {
       return I18n.t('errors.reasons.forbidden');
     } else {
@@ -75,6 +69,8 @@ export default ObjectController.extend({
       return I18n.t('errors.desc.network_fixed');
     } else if (this.get('isNetwork')) {
       return I18n.t('errors.desc.network');
+    } else if (this.get('isNotFound')) {
+      return I18n.t('errors.desc.not_found');
     } else if (this.get('isServer')) {
       return I18n.t('errors.desc.server', { status: this.get('thrown.status') + " " + this.get('thrown.statusText') });
     } else {

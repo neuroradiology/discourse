@@ -1,32 +1,26 @@
+import computed from 'ember-addons/ember-computed-decorators';
 import DiscoveryController from 'discourse/controllers/discovery';
 
 export default DiscoveryController.extend({
   needs: ['modal', 'discovery'],
 
-  withLogo: Em.computed.filterBy('categories', 'logo_url'),
-  showPostsColumn: Em.computed.empty('withLogo'),
+  // this makes sure the composer isn't scoping to a specific category
+  category: null,
 
-  actions: {
-    refresh: function() {
-      var self = this;
-
-      // Don't refresh if we're still loading
-      if (this.get('controllers.discovery.loading')) { return; }
-
-      this.send('loading');
-      Discourse.CategoryList.list('categories').then(function(list) {
-        self.set('model', list);
-        self.send('loadingComplete');
-      });
-    }
+  @computed
+  canEdit() {
+    return Discourse.User.currentProp('staff');
   },
 
-  canEdit: function() {
-    return Discourse.User.currentProp('staff');
-  }.property(),
+  @computed("model.categories.@each.featuredTopics.length")
+  latestTopicOnly() {
+    return this.get("model.categories").find(c => c.get("featuredTopics.length") > 1) === undefined;
+  },
 
-  latestTopicOnly: function() {
-    return this.get('categories').find(function(c) { return c.get('featuredTopics.length') > 1; }) === undefined;
-  }.property('categories.@each.featuredTopics.length')
+  @computed("model.parentCategory")
+  categoryPageStyle(parentCategory) {
+    const style = this.siteSettings.desktop_category_page_style;
+    return parentCategory && style === "categories_and_latest_topics" ? "categories_only" : style;
+  }
 
 });

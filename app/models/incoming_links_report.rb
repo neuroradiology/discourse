@@ -35,9 +35,10 @@ class IncomingLinksReport
 
     num_clicks  = link_count_per_user
     num_topics = topic_count_per_user
+    user_id_lookup = User.where(username: num_clicks.keys).select(:id, :username).inject({}) {|sum,v| sum[v.username] = v.id; sum;}
     report.data = []
-    num_clicks.keys.each do |username|
-      report.data << {username: username, num_clicks: num_clicks[username], num_topics: num_topics[username]}
+    num_clicks.each_key do |username|
+      report.data << {username: username, user_id: user_id_lookup[username], num_clicks: num_clicks[username], num_topics: num_topics[username]}
     end
     report.data = report.data.sort_by {|x| x[:num_clicks]}.reverse[0,10]
   end
@@ -46,7 +47,6 @@ class IncomingLinksReport
     @per_user_query ||= IncomingLink
         .where('incoming_links.created_at > ? AND incoming_links.user_id IS NOT NULL', 30.days.ago)
         .joins(:user)
-        .joins(:post)
         .group('users.username')
   end
 
@@ -55,7 +55,7 @@ class IncomingLinksReport
   end
 
   def self.topic_count_per_user
-    per_user.count('topic_id', distinct: true)
+    per_user.joins(:post).count("DISTINCT posts.topic_id")
   end
 
 
@@ -68,7 +68,7 @@ class IncomingLinksReport
     num_clicks  = link_count_per_domain
     num_topics = topic_count_per_domain(num_clicks.keys)
     report.data = []
-    num_clicks.keys.each do |domain|
+    num_clicks.each_key do |domain|
       report.data << {domain: domain, num_clicks: num_clicks[domain], num_topics: num_topics[domain]}
     end
     report.data = report.data.sort_by {|x| x[:num_clicks]}.reverse[0,10]
@@ -85,14 +85,13 @@ class IncomingLinksReport
   def self.per_domain(domains)
     IncomingLink
         .joins(:incoming_referer => :incoming_domain)
-        .joins(:post)
         .where('incoming_links.created_at > ? AND incoming_domains.name IN (?)', 30.days.ago, domains)
         .group('incoming_domains.name')
   end
 
   def self.topic_count_per_domain(domains)
     # COUNT(DISTINCT) is slow
-    per_domain(domains).count('topic_id', distinct: true)
+    per_domain(domains).joins(:post).count("DISTINCT posts.topic_id")
   end
 
 

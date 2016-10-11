@@ -1,4 +1,4 @@
-require 'spec_helper'
+require 'rails_helper'
 
 # In the ghetto ... getting the spec to run in autospec
 #  thing is we need to load up all auth really early pre-fork
@@ -20,14 +20,22 @@ describe Auth::FacebookAuthenticator do
           }
         },
         "info" => {
-          :email => user.email
+          :email => user.email,
+          "location" => "America",
+          "description" => "bio",
+          "urls" => {
+            "Website" => "https://awesome.com"
+          }
         },
         "uid" => "100"
       }
 
       result = authenticator.after_authenticate(hash)
 
-      result.user.id.should == user.id
+      expect(result.user.id).to eq(user.id)
+      expect(result.user.user_profile.website).to eq("https://awesome.com")
+      expect(result.user.user_profile.bio_raw).to eq("bio")
+      expect(result.user.user_profile.location).to eq("America")
     end
 
     it 'can create a proper result for non existing users' do
@@ -49,8 +57,8 @@ describe Auth::FacebookAuthenticator do
 
       result = authenticator.after_authenticate(hash)
 
-      result.user.should == nil
-      result.extra_data[:name].should == "bob bob"
+      expect(result.user).to eq(nil)
+      expect(result.extra_data[:name]).to eq("bob bob")
     end
   end
 

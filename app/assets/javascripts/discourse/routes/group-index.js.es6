@@ -1,10 +1,16 @@
 export default Discourse.Route.extend({
-  model: function() {
-    return this.modelFor('group').findPosts();
+
+  titleToken() {
+    return I18n.t('groups.members');
   },
 
-  setupController: function(controller, model) {
-    controller.set('model', model);
-    this.controllerFor('group').set('showing', 'index');
+  model() {
+    return this.modelFor("group");
+  },
+
+  setupController(controller, model) {
+    this.controllerFor("group").set("showing", "members");
+    controller.set("model", model);
+    model.findMembers();
   }
 });

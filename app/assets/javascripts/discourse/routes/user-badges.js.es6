@@ -1,17 +1,24 @@
-export default Discourse.Route.extend({
-  model: function() {
-    return Discourse.UserBadge.findByUsername(this.modelFor('user').get('username_lower'), {grouped: true});
+import ViewingActionType from "discourse/mixins/viewing-action-type";
+import UserBadge from 'discourse/models/user-badge';
+
+export default Discourse.Route.extend(ViewingActionType, {
+  model() {
+    return UserBadge.findByUsername(this.modelFor("user").get("username_lower"), { grouped: true });
   },
 
-  setupController: function(controller, model) {
-    this.controllerFor('user').set('indexStream', false);
-    if (this.controllerFor('user_activity').get('content')) {
-      this.controllerFor('user_activity').set('userActionType', -1);
+  setupController(controller, model) {
+    this.viewingActionType(-1);
+    controller.set("model", model);
+  },
+
+  renderTemplate() {
+    this.render("user/badges", {into: "user"});
+  },
+
+  actions: {
+    didTransition() {
+      this.controllerFor("application").set("showFooter", true);
+      return true;
     }
-    controller.set('model', model);
-  },
-
-  renderTemplate: function() {
-    this.render('user/badges', {into: 'user', outlet: 'userOutlet'});
   }
 });

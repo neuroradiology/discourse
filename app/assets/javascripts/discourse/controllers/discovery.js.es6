@@ -1,17 +1,20 @@
-import ObjectController from 'discourse/controllers/object';
-import TopPeriod from 'discourse/models/top-period';
+import DiscourseURL from 'discourse/lib/url';
 
-export default ObjectController.extend({
-  needs: ['navigation/category'],
+export default Ember.Controller.extend({
+  needs: ['navigation/category', 'discovery/topics', 'application'],
   loading: false,
-  loadingSpinner: false,
-  scheduledSpinner: null,
 
   category: Em.computed.alias('controllers.navigation/category.category'),
   noSubcategories: Em.computed.alias('controllers.navigation/category.noSubcategories'),
 
-  showMoreUrl: function(period) {
-    var url = '', category = this.get('category');
+  loadedAllItems: Em.computed.not("controllers.discovery/topics.model.canLoadMore"),
+
+  _showFooter: function() {
+    this.set("controllers.application.showFooter", this.get("loadedAllItems"));
+  }.observes("loadedAllItems"),
+
+  showMoreUrl(period) {
+    let url = '', category = this.get('category');
     if (category) {
       url = '/c/' + Discourse.Category.slugFor(category) + (this.get('noSubcategories') ? '/none' : '') + '/l';
     }
@@ -19,15 +22,10 @@ export default ObjectController.extend({
     return url;
   },
 
-  periods: function() {
-    var self = this,
-        periods = [];
-    Discourse.Site.currentProp('periods').forEach(function(p) {
-      periods.pushObject(TopPeriod.create({ id: p,
-                                            showMoreUrl: self.showMoreUrl(p),
-                                            periods: periods }));
-    });
-    return periods;
-  }.property('category', 'noSubcategories'),
+  actions: {
+    changePeriod(p) {
+      DiscourseURL.routeTo(this.showMoreUrl(p));
+    }
+  }
 
 });

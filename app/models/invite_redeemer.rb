@@ -30,6 +30,8 @@ InviteRedeemer = Struct.new(:invite, :username, :name) do
     available_name = name || available_username
 
     user = User.new(email: invite.email, username: available_username, name: available_name, active: true, trust_level: SiteSetting.default_invitee_trust_level)
+
+    user.moderator = true if invite.moderator? && invite.invited_by.staff?
     user.save!
 
     user
@@ -49,6 +51,7 @@ InviteRedeemer = Struct.new(:invite, :username, :name) do
     approve_account_if_needed
     notify_invitee
     send_password_instructions
+    delete_duplicate_invites
   end
 
   def invite_was_redeemed?
@@ -88,8 +91,9 @@ InviteRedeemer = Struct.new(:invite, :username, :name) do
   end
 
   def add_user_to_groups
-    invite.groups.each do |g|
-      invited_user.group_users.create(group_id: g.id)
+    new_group_ids = invite.groups.pluck(:id) - invited_user.group_users.pluck(:group_id)
+    new_group_ids.each do |id|
+      invited_user.group_users.create(group_id: id)
     end
   end
 
@@ -110,7 +114,13 @@ InviteRedeemer = Struct.new(:invite, :username, :name) do
   end
 
   def notify_invitee
-    invite.invited_by.notifications.create(notification_type: Notification.types[:invitee_accepted],
-                                           data: {display_username: invited_user.username}.to_json)
+    if inviter = invite.invited_by
+        inviter.notifications.create(notification_type: Notification.types[:invitee_accepted],
+                                     data: {display_username: invited_user.username}.to_json)
+    end
+  end
+
+  def delete_duplicate_invites
+    Invite.where('invites.email = ? AND redeemed_at IS NULL AND invites.id != ?', invite.email, invite.id).delete_all
   end
 end

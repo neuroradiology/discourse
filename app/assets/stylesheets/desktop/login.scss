@@ -14,13 +14,7 @@
 
 #login-form {
   a {
-    color: scale-color($primary, $lightness: 35%);
-  }
-}
-
-.login-modal {
-  .fa-spinner {
-    font-size: 18px;
+    color: dark-light-choose(scale-color($primary, $lightness: 35%), scale-color($secondary, $lightness: 65%));
   }
 }
 
@@ -51,12 +45,8 @@
 
   tr.instructions {
     label {
-      color: scale-color($primary, $lightness: 50%);
+      color: dark-light-choose(scale-color($primary, $lightness: 50%), scale-color($secondary, $lightness: 50%));
     }
-  }
-
-  .fa-spinner {
-    font-size: 18px;
   }
 
   .tos-agree {

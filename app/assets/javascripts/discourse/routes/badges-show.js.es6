@@ -1,30 +1,49 @@
+import UserBadge from 'discourse/models/user-badge';
+import Badge from 'discourse/models/badge';
+import PreloadStore from 'preload-store';
+
 export default Discourse.Route.extend({
-  serialize: function(model) {
-    return {id: model.get('id'), slug: model.get('name').replace(/[^A-Za-z0-9_]+/g, '-').toLowerCase()};
+  queryParams: {
+    username: {
+      refreshModel: true
+    }
+  },
+  actions: {
+    didTransition() {
+      this.controllerFor("badges/show")._showFooter();
+      return true;
+    }
   },
 
-  model: function(params) {
-    if (PreloadStore.get('badge')) {
-      return PreloadStore.getAndRemove('badge').then(function(json) {
-        return Discourse.Badge.createFromJson(json);
-      });
+  serialize(model) {
+    return model.getProperties('id', 'slug');
+  },
+
+  model(params) {
+    if (PreloadStore.get("badge")) {
+      return PreloadStore.getAndRemove("badge").then(json => Badge.createFromJson(json));
     } else {
-      return Discourse.Badge.findById(params.id);
+      return Badge.findById(params.id);
     }
   },
 
-  titleToken: function() {
-    var model = this.modelFor('badges.show');
-    if (model) {
-      return model.get('displayName');
-    }
-  },
+  afterModel(model, transition) {
+    const username = transition.queryParams && transition.queryParams.username;
 
-  setupController: function(controller, model) {
-    Discourse.UserBadge.findByBadgeId(model.get('id')).then(function(userBadges) {
-      controller.set('userBadges', userBadges);
-      controller.set('userBadgesLoaded', true);
+    return UserBadge.findByBadgeId(model.get("id"), {username}).then(userBadges => {
+      this.userBadges = userBadges;
     });
-    controller.set('model', model);
+  },
+
+  titleToken() {
+    const model = this.modelFor("badges.show");
+    if (model) {
+      return model.get("name");
+    }
+  },
+
+  setupController(controller, model) {
+    controller.set("model", model);
+    controller.set("userBadges", this.userBadges);
   }
 });

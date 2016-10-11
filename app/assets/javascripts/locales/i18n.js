@@ -52,6 +52,8 @@ I18n.PLACEHOLDER = /(?:\{\{|%\{)(.*?)(?:\}\}?)/gm;
 
 I18n.fallbackRules = {};
 
+I18n.noFallbacks = false;
+
 I18n.pluralizationRules = {
   en: function(n) {
     return n === 0 ? ["zero", "none", "other"] : n === 1 ? "one" : "other";
@@ -90,6 +92,26 @@ I18n.isValidNode = function(obj, node, undefined) {
   return obj[node] !== null && obj[node] !== undefined;
 };
 
+function checkExtras(origScope, sep, extras) {
+  if (!extras || extras.length === 0) { return; }
+
+  for (var i=0; i<extras.length; i++) {
+    var messages = extras[i];
+    scope = origScope.split(sep);
+    if (scope[0] === 'js') {
+      scope.shift();
+    }
+
+    while (messages && scope.length > 0) {
+      currentScope = scope.shift();
+      messages = messages[currentScope];
+    }
+    if (messages !== undefined) {
+      return messages;
+    }
+  }
+}
+
 I18n.lookup = function(scope, options) {
   options = options || {};
   var lookupInitialScope = scope,
@@ -108,25 +130,32 @@ I18n.lookup = function(scope, options) {
     scope = options.scope.toString() + this.defaultSeparator + scope;
   }
 
-  scope = scope.split(this.defaultSeparator);
+  var origScope = "" + scope;
+
+  scope = origScope.split(this.defaultSeparator);
 
   while (messages && scope.length > 0) {
     currentScope = scope.shift();
     messages = messages[currentScope];
   }
 
-  if (!messages) {
+  if (messages === undefined) {
+    messages = checkExtras(origScope, this.defaultSeparator, this.extras);
+  }
+
+
+  if (messages === undefined) {
     if (I18n.fallbacks) {
       var fallbacks = this.getFallbacks(locale);
       for (var fallback = 0; fallback < fallbacks.length; fallbacks++) {
         messages = I18n.lookup(lookupInitialScope, this.prepareOptions({locale: fallbacks[fallback]}, options));
-        if (messages) {
+        if (messages !== undefined) {
           break;
         }
       }
     }
 
-    if (!messages && this.isValidNode(options, "defaultValue")) {
+    if (messages === undefined && this.isValidNode(options, "defaultValue")) {
         messages = options.defaultValue;
     }
   }
@@ -190,8 +219,19 @@ I18n.interpolate = function(message, options) {
 };
 
 I18n.translate = function(scope, options) {
+
   options = this.prepareOptions(options);
+
   var translation = this.lookup(scope, options);
+  // Fallback to the default locale
+  if (!translation && this.currentLocale() !== this.defaultLocale && !this.noFallbacks) {
+    options.locale = this.defaultLocale;
+    translation = this.lookup(scope, options);
+  }
+  if (!translation && this.currentLocale() !== 'en' && !this.noFallbacks) {
+    options.locale = 'en';
+    translation = this.lookup(scope, options);
+  }
 
   try {
     if (typeof translation === "object") {
@@ -513,6 +553,7 @@ I18n.enable_verbose_localization = function(){
   var keys = {};
   var t = I18n.t;
 
+  I18n.noFallbacks = true;
 
   I18n.t = I18n.translate = function(scope, value){
     var current = keys[scope];
@@ -522,7 +563,7 @@ I18n.enable_verbose_localization = function(){
       if (!_.isEmpty(value)) {
         message += ", parameters: " + JSON.stringify(value);
       }
-      window.console.log(message);
+      Em.Logger.info(message);
     }
     return t.apply(I18n, [scope, value]) + " (t" + current + ")";
   };

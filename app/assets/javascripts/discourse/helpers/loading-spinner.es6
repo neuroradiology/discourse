@@ -1,7 +1,15 @@
-var spinnerHTML = "<div class='spinner'><div class='spinner-container container1'><div class='circle1'></div><div class='circle2'></div><div class='circle3'></div><div class='circle4'></div></div><div class='spinner-container container2'><div class='circle1'></div><div class='circle2'></div><div class='circle3'></div><div class='circle4'></div></div><div class='spinner-container container3'><div class='circle1'></div><div class='circle2'></div><div class='circle3'></div><div class='circle4'></div></div></div>";
+import { htmlHelper } from 'discourse-common/lib/helpers';
 
-Handlebars.registerHelper('loading-spinner', function() {
-    return new Handlebars.SafeString(spinnerHTML);
+function renderSpinner(cssClass) {
+  var html = "<div class='spinner";
+  if (cssClass) { html += ' ' + cssClass; }
+  return html + "'></div>";
+}
+var spinnerHTML = renderSpinner();
+
+export default htmlHelper(params => {
+  const hash = params.hash;
+  return renderSpinner((hash && hash.size) ? hash.size : undefined);
 });
 
-export { spinnerHTML };
+export { spinnerHTML, renderSpinner };

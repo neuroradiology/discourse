@@ -1,19 +1,30 @@
-export default Discourse.Route.extend({
-  model: function() {
-    var user = this.modelFor('user');
-    return Discourse.NotificationContainer.loadHistory(undefined, user.get('username'));
+import ViewingActionType from "discourse/mixins/viewing-action-type";
+
+export default Discourse.Route.extend(ViewingActionType, {
+
+  renderTemplate() {
+    this.render('user/notifications');
   },
 
-  setupController: function(controller, model) {
-    this.controllerFor('user').set('indexStream', false);
-    if (this.controllerFor('user_activity').get('content')) {
-      this.controllerFor('user_activity').set('userActionType', -1);
+  actions: {
+    didTransition() {
+      this.controllerFor("user-notifications")._showFooter();
+      return true;
     }
-    controller.set('model', model);
-    controller.set('user', this.modelFor('user'));
   },
 
-  renderTemplate: function() {
-    this.render('user-notification-history', {into: 'user', outlet: 'userOutlet'});
+  model() {
+    const username = this.modelFor("user").get("username");
+
+    if (this.get("currentUser.username") ===  username || this.get("currentUser.admin")) {
+      return this.store.find("notification", { username } );
+    }
+  },
+
+
+  setupController(controller, model) {
+    controller.set("model", model);
+    controller.set("user", this.modelFor("user"));
+    this.viewingActionType(-1);
   }
 });
